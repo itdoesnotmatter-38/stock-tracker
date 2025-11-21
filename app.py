@@ -4,11 +4,9 @@ import pandas as pd
 import plotly.graph_objs as go
 from plotly.subplots import make_subplots
 import os
-import requests
-import xml.etree.ElementTree as ET # For parsing Google News
 
 # --- CONFIGURATION ---
-st.set_page_config(layout="wide", page_title="Global Stock Tracker Pro")
+st.set_page_config(layout="wide", page_title="Global Stock Tracker")
 FILE_NAME = "portfolio.csv"
 USD_TO_HKD = 7.78
 HKD_TO_USD = 1 / USD_TO_HKD
@@ -29,25 +27,24 @@ def check_password():
         st.text_input("Password", type="password", on_change=password_entered, key="password")
         st.error("😕 Password incorrect")
         return False
-    else:
-        return True
+    return True
 
 if not check_password():
     st.stop()
 
-# --- STOCK NAMES ---
+# --- STOCK NAMES DICTIONARY ---
 STOCK_NAMES = {
     "TSLA": "Tesla Inc", "NVDA": "NVIDIA Corp", "META": "Meta Platforms",
     "ORCL": "Oracle Corp", "PLTR": "Palantir Tech", "SOFI": "SoFi Tech",
     "QUBT": "Quantum Comp", "FLNC": "Fluence Energy", "SNOW": "Snowflake",
-    "ZM": "Zoom Video", "FIG": "Figma (Private?)", "AAPL": "Apple Inc", 
-    "MSFT": "Microsoft", "GOOGL": "Alphabet", "AMZN": "Amazon",
-    "9988.HK": "阿里巴巴", "0700.HK": "騰訊控股", "0388.HK": "香港交易所",
-    "0981.HK": "中芯國際", "1810.HK": "小米集團", "1211.HK": "比亞迪股份",
-    "0285.HK": "比亞迪電子", "9698.HK": "萬國數據", "3993.HK": "洛陽鉬業",
-    "0909.HK": "明源雲", "9618.HK": "京東集團"
+    "ZM": "Zoom Video", "FIG": "Figma (Private?)", "AAPL": "Apple Inc", "MSFT": "Microsoft",
+    "9698.HK": "GDS Holdings", "0388.HK": "HKEX", "9988.HK": "Alibaba",
+    "0981.HK": "SMIC", "0700.HK": "Tencent", "1810.HK": "Xiaomi",
+    "3993.HK": "CMOC", "1211.HK": "BYD Co", "0285.HK": "BYD Electronic",
+    "0909.HK": "Ming Yuan Cloud", "9618.HK": "JD.com"
 }
 
+# --- SESSION STATE (For Click Selection) ---
 if 'selected_ticker' not in st.session_state:
     st.session_state.selected_ticker = None
 
@@ -93,15 +90,14 @@ def calculate_holdings(df):
 
 def get_market_data(ticker):
     try:
-        df = yf.download(ticker, period="10y", progress=False)
+        df = yf.download(ticker, period="2y", progress=False)
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
         df.reset_index(inplace=True)
-        
+        # Indicators
         df['SMA_20'] = df['Close'].rolling(window=20).mean()
         df['SMA_50'] = df['Close'].rolling(window=50).mean()
         df['SMA_100'] = df['Close'].rolling(window=100).mean()
         df['SMA_250'] = df['Close'].rolling(window=250).mean()
-        
         delta = df['Close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
@@ -110,51 +106,38 @@ def get_market_data(ticker):
         return df
     except: return None
 
-# --- NEW: GOOGLE NEWS FETCHER (More Reliable) ---
-def get_google_news(ticker):
-    # Customize search for HK vs US
-    query = f"{ticker} stock news"
-    if ".HK" in ticker:
-        query = f"{ticker} 股票新闻" # Chinese search for HK stocks usually gives better results
-    
-    url = f"https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en"
-    
-    try:
-        response = requests.get(url, timeout=5)
-        root = ET.fromstring(response.content)
-        items = root.findall('.//item')[:5] # Top 5 news
-        
-        news_data = []
-        for item in items:
-            news_data.append({
-                'title': item.find('title').text,
-                'link': item.find('link').text,
-                'date': item.find('pubDate').text[:16] # Shorten date
-            })
-        return news_data
-    except:
-        return []
-
 # --- MAIN APP ---
-st.title("🌏 Global Stock Tracker Pro")
+st.title("🌏 Global Stock Tracker")
 
-with st.sidebar.form("entry"):
-    st.header("Add Trade")
-    d = st.date_input("Date")
-    a = st.selectbox("Action", ["Buy", "Sell"])
-    t_input = st.text_input("Ticker (e.g. 9988.HK)", "").upper()
-    q = st.number_input("Quantity", 1.0)
-    p = st.number_input("Price", 0.01)
-    if st.form_submit_button("Save"):
-        save_transaction(d, t_input, a, q, p)
-        st.success("Saved")
+# SIDEBAR
+with st.sidebar:
+    st.header("Control Panel")
+    
+    # 1. REFRESH BUTTON
+    if st.button("🔄 Refresh Data", type="primary", use_container_width=True):
         st.rerun()
+        
+    st.divider()
+    
+    # 2. ADD TRADE FORM
+    with st.form("entry"):
+        st.subheader("Add Trade")
+        d = st.date_input("Date")
+        a = st.selectbox("Action", ["Buy", "Sell"])
+        t_input = st.text_input("Ticker (e.g. 9988.HK)", "").upper()
+        q = st.number_input("Quantity", 1.0)
+        p = st.number_input("Price", 0.01)
+        if st.form_submit_button("Save Transaction"):
+            save_transaction(d, t_input, a, q, p)
+            st.success("Saved")
+            st.rerun()
 
+# --- PROCESSING ---
 df_raw = load_portfolio()
 holdings = calculate_holdings(df_raw)
 
 if not holdings.empty:
-    # P/L Logic
+    # FETCH PRICES
     tickers = " ".join(holdings['Ticker'].tolist())
     try:
         hist_data = yf.download(tickers, period="5d", progress=False)
@@ -172,127 +155,118 @@ if not holdings.empty:
     except:
         holdings['Current Price'] = holdings['Avg Cost']; holdings['Prev Close'] = holdings['Avg Cost']
 
+    # --- CALCULATIONS ---
     holdings['Value (Native)'] = holdings['Current Price'] * holdings['Shares']
     holdings['Profit (Native)'] = holdings['Value (Native)'] - holdings['Total Cost Basis']
     holdings['Return %'] = (holdings['Profit (Native)'] / holdings['Total Cost Basis']) * 100
     holdings['Day Change $'] = (holdings['Current Price'] - holdings['Prev Close']) * holdings['Shares']
-    
+    holdings['Day Change %'] = ((holdings['Current Price'] - holdings['Prev Close']) / holdings['Prev Close']) * 100
+
+    # Conversions
     def to_hkd(row, col): return row[col] if ".HK" in row['Ticker'] else row[col] * USD_TO_HKD
     holdings['Value (HKD)'] = holdings.apply(lambda x: to_hkd(x, 'Value (Native)'), axis=1)
     holdings['Profit (HKD)'] = holdings.apply(lambda x: to_hkd(x, 'Profit (Native)'), axis=1)
     holdings['Day Change (HKD)'] = holdings.apply(lambda x: to_hkd(x, 'Day Change $'), axis=1)
 
+    # --- GLOBAL TOTALS ---
     total_val_hkd = holdings['Value (HKD)'].sum()
     total_profit_hkd = holdings['Profit (HKD)'].sum()
     total_day_change_hkd = holdings['Day Change (HKD)'].sum()
+    
+    # Global Day % 
     prev_total_val_hkd = total_val_hkd - total_day_change_hkd
     global_day_pct = (total_day_change_hkd / prev_total_val_hkd * 100) if prev_total_val_hkd > 0 else 0.0
 
+    # --- GLOBAL HEADLINE ---
     c1, c2, c3 = st.columns(3)
     c1.metric("💰 Portfolio Value", f"HK$ {total_val_hkd:,.0f}")
     c2.metric("📈 Total Profit", f"HK$ {total_profit_hkd:,.0f}", delta_color="normal" if total_profit_hkd >= 0 else "inverse")
     c3.metric("⚡ Day's P/L", f"HK$ {total_day_change_hkd:,.0f}", delta=f"{global_day_pct:+.2f}%")
     st.divider()
 
+    # --- TABS ---
     tab_us, tab_hk, tab_hist = st.tabs(["🇺🇸 US Market", "🇭🇰 HK Market", "📋 History"])
 
     def render_interactive_table(df, currency):
+        # Market Specific Totals
         mkt_val = df['Value (Native)'].sum()
+        mkt_profit = df['Profit (Native)'].sum()
         mkt_day_pl = df['Day Change $'].sum()
+        
+        # Calculate Market Day %
         prev_mkt_val = mkt_val - mkt_day_pl
         mkt_pct = (mkt_day_pl / prev_mkt_val * 100) if prev_mkt_val > 0 else 0.0
 
-        c1, c2 = st.columns(2)
+        # 3 METRICS PER MARKET
+        c1, c2, c3 = st.columns(3)
         c1.metric("Market Value", f"{currency} {mkt_val:,.0f}")
-        c2.metric("Day's P/L", f"{currency} {mkt_day_pl:,.0f}", delta=f"{mkt_pct:+.2f}%")
+        c2.metric("Total Profit", f"{currency} {mkt_profit:,.0f}", delta_color="normal" if mkt_profit >= 0 else "inverse")
+        c3.metric("Day's P/L", f"{currency} {mkt_day_pl:,.0f}", delta=f"{mkt_pct:+.2f}%")
         
-        cols = ['Ticker', 'Name', 'Shares', 'Avg Cost', 'Current Price', 'Value (Native)', 'Profit (Native)', 'Return %']
+        # Interactive Table
+        cols = ['Ticker', 'Name', 'Shares', 'Avg Cost', 'Current Price', 'Value (Native)', 'Profit (Native)', 'Return %', 'Day Change %']
+        
         event = st.dataframe(
             df[cols].style.format({
                 "Avg Cost": f"{currency} {{:.2f}}", "Current Price": f"{currency} {{:.2f}}",
                 "Value (Native)": f"{currency} {{:,.0f}}", "Profit (Native)": f"{currency} {{:+,.0f}}",
-                "Return %": "{:+.1f}%"
-            }).map(lambda x: f"color: {'green' if x > 0 else 'red'}", subset=['Profit (Native)', 'Return %']),
-            column_config={"Name": st.column_config.TextColumn("Stock", width="medium")},
+                "Return %": "{:+.1f}%", "Day Change %": "{:+.2f}%"
+            }).map(lambda x: f"color: {'green' if x > 0 else 'red'}", subset=['Profit (Native)', 'Return %', 'Day Change %']),
+            column_config={
+                "Name": st.column_config.TextColumn("Stock", width="medium"),
+                "Return %": st.column_config.NumberColumn("Total Return %"),
+                "Day Change %": st.column_config.NumberColumn("Day %")
+            },
             use_container_width=True, hide_index=True, on_select="rerun", selection_mode="single-row"
         )
+        
+        # CLICK LOGIC: Update Session State
         if len(event.selection['rows']) > 0:
             row_idx = event.selection['rows'][0]
             st.session_state.selected_ticker = df.iloc[row_idx]['Ticker']
 
-    with tab_us: render_interactive_table(holdings[~holdings['Ticker'].str.contains(".HK")], "$")
-    with tab_hk: render_interactive_table(holdings[holdings['Ticker'].str.contains(".HK")], "HK$")
-    with tab_hist: st.dataframe(df_raw.sort_index(ascending=False))
+    with tab_us:
+        render_interactive_table(holdings[~holdings['Ticker'].str.contains(".HK")], "$")
 
+    with tab_hk:
+        render_interactive_table(holdings[holdings['Ticker'].str.contains(".HK")], "HK$")
+
+    with tab_hist:
+        st.dataframe(df_raw.sort_index(ascending=False))
+
+    # --- ANALYSIS SECTION ---
     st.divider()
-    st.subheader("📊 Professional Analysis & News")
     
+    # Determine Target: 1. Clicked Row, 2. Dropdown Fallback
     current_selection = st.session_state.selected_ticker if st.session_state.selected_ticker else holdings.iloc[0]['Ticker']
     
-    col_chart, col_news = st.columns([3, 1])
+    st.subheader(f"📊 Analysis: {STOCK_NAMES.get(current_selection, current_selection)}")
     
-    with col_chart:
-        col_a, col_b = st.columns([1,4])
-        with col_a:
-            selected_dd = st.selectbox("Select Stock", holdings['Ticker'].unique(), 
-                                    index=list(holdings['Ticker']).index(current_selection) if current_selection in list(holdings['Ticker']) else 0)
-            if selected_dd != current_selection:
-                st.session_state.selected_ticker = selected_dd
-                st.rerun()
-                
-        target = st.session_state.selected_ticker if st.session_state.selected_ticker else selected_dd
-        st.markdown(f"### {STOCK_NAMES.get(target, target)} ({target})")
-        data = get_market_data(target)
-        
-        if data is not None:
-            # FIX: Reduce vertical spacing to close the gap
-            fig = make_subplots(rows=2, cols=1, row_heights=[0.8, 0.2], shared_xaxes=True, vertical_spacing=0.03)
+    col_a, col_b = st.columns([1,4])
+    with col_a:
+        # Dropdown syncs with click
+        selected_dd = st.selectbox("Select Stock", holdings['Ticker'].unique(), 
+                                   index=list(holdings['Ticker']).index(current_selection) if current_selection in list(holdings['Ticker']) else 0)
+        if selected_dd != current_selection:
+            st.session_state.selected_ticker = selected_dd
+            st.rerun()
             
-            # Price & MA
+    with col_b:
+        data = get_market_data(current_selection)
+        if data is not None:
+            fig = make_subplots(rows=2, cols=1, row_heights=[0.7, 0.3], shared_xaxes=True)
             fig.add_trace(go.Candlestick(x=data['Date'], open=data['Open'], close=data['Close'], high=data['High'], low=data['Low'], name="Price"), row=1, col=1)
             fig.add_trace(go.Scatter(x=data['Date'], y=data['SMA_20'], line=dict(color='#2ecc71', width=1), name="SMA 20"), row=1, col=1)
             fig.add_trace(go.Scatter(x=data['Date'], y=data['SMA_50'], line=dict(color='#3498db', width=1), name="SMA 50"), row=1, col=1)
             fig.add_trace(go.Scatter(x=data['Date'], y=data['SMA_100'], line=dict(color='#f39c12', width=1), name="SMA 100"), row=1, col=1)
             fig.add_trace(go.Scatter(x=data['Date'], y=data['SMA_250'], line=dict(color='#e74c3c', width=2), name="SMA 250"), row=1, col=1)
-            
-            # RSI
             fig.add_trace(go.Scatter(x=data['Date'], y=data['RSI'], line=dict(color='purple'), name="RSI"), row=2, col=1)
             fig.add_hline(y=30, row=2, col=1, line_dash="dot", line_color="green")
             fig.add_hline(y=70, row=2, col=1, line_dash="dot", line_color="red")
-            
-            fig.update_layout(
-                height=700, 
-                xaxis_rangeslider_visible=False,
-                margin=dict(l=10, r=10, t=30, b=10), # Reduce whitespace
-                xaxis=dict(
-                    rangeselector=dict(
-                        buttons=list([
-                            dict(count=1, label="1m", step="month", stepmode="backward"),
-                            dict(count=6, label="6m", step="month", stepmode="backward"),
-                            dict(count=1, label="YTD", step="year", stepmode="todate"),
-                            dict(count=1, label="1y", step="year", stepmode="backward"),
-                            dict(step="all")
-                        ])
-                    ),
-                    type="date"
-                )
-            )
+            fig.update_layout(height=700, xaxis_rangeslider_visible=False)
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.error("Could not load data.")
 
-    with col_news:
-        st.write(f"**📰 Latest News**")
-        news_items = get_google_news(target)
-        if news_items:
-            for item in news_items:
-                st.markdown(f"""
-                <div style="padding: 10px; border-radius: 5px; margin-bottom: 10px; background-color: #f0f2f6;">
-                    <a href="{item['link']}" target="_blank" style="text-decoration: none; color: #333; font-weight: bold;">{item['title']}</a>
-                    <br><span style="font-size: 0.8em; color: #666;">{item['date']}</span>
-                </div>
-                """, unsafe_allow_html=True)
-        else:
-            st.info("No news found.")
 else:
     st.info("Add a trade to see the dashboard.")
