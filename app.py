@@ -4,7 +4,8 @@ import pandas as pd
 import plotly.graph_objs as go
 from plotly.subplots import make_subplots
 import os
-from datetime import datetime
+import requests
+import xml.etree.ElementTree as ET # For parsing Google News
 
 # --- CONFIGURATION ---
 st.set_page_config(layout="wide", page_title="Global Stock Tracker Pro")
@@ -15,7 +16,7 @@ HKD_TO_USD = 1 / USD_TO_HKD
 # --- 🔐 PASSWORD PROTECTION ---
 def check_password():
     def password_entered():
-        if st.session_state["password"] == "everyday38": 
+        if st.session_state["password"] == "admin123": 
             st.session_state["password_correct"] = True
             del st.session_state["password"]
         else:
@@ -34,23 +35,19 @@ def check_password():
 if not check_password():
     st.stop()
 
-# --- 1. STOCK NAMES (With Traditional Chinese) ---
+# --- STOCK NAMES ---
 STOCK_NAMES = {
-    # US Stocks (English)
     "TSLA": "Tesla Inc", "NVDA": "NVIDIA Corp", "META": "Meta Platforms",
     "ORCL": "Oracle Corp", "PLTR": "Palantir Tech", "SOFI": "SoFi Tech",
     "QUBT": "Quantum Comp", "FLNC": "Fluence Energy", "SNOW": "Snowflake",
     "ZM": "Zoom Video", "FIG": "Figma (Private?)", "AAPL": "Apple Inc", 
     "MSFT": "Microsoft", "GOOGL": "Alphabet", "AMZN": "Amazon",
-    
-    # HK Stocks (Traditional Chinese)
     "9988.HK": "阿里巴巴", "0700.HK": "騰訊控股", "0388.HK": "香港交易所",
     "0981.HK": "中芯國際", "1810.HK": "小米集團", "1211.HK": "比亞迪股份",
     "0285.HK": "比亞迪電子", "9698.HK": "萬國數據", "3993.HK": "洛陽鉬業",
     "0909.HK": "明源雲", "9618.HK": "京東集團"
 }
 
-# --- SESSION STATE ---
 if 'selected_ticker' not in st.session_state:
     st.session_state.selected_ticker = None
 
@@ -94,10 +91,8 @@ def calculate_holdings(df):
             })
     return pd.DataFrame(results)
 
-# --- NEW: 10 YEAR DATA ---
 def get_market_data(ticker):
     try:
-        # Changed period to 10y
         df = yf.download(ticker, period="10y", progress=False)
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
         df.reset_index(inplace=True)
@@ -115,18 +110,34 @@ def get_market_data(ticker):
         return df
     except: return None
 
-# --- NEW: NEWS FETCHER ---
-def get_stock_news(ticker):
+# --- NEW: GOOGLE NEWS FETCHER (More Reliable) ---
+def get_google_news(ticker):
+    # Customize search for HK vs US
+    query = f"{ticker} stock news"
+    if ".HK" in ticker:
+        query = f"{ticker} 股票新闻" # Chinese search for HK stocks usually gives better results
+    
+    url = f"https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en"
+    
     try:
-        stock = yf.Ticker(ticker)
-        return stock.news[:5] # Return top 5 stories
+        response = requests.get(url, timeout=5)
+        root = ET.fromstring(response.content)
+        items = root.findall('.//item')[:5] # Top 5 news
+        
+        news_data = []
+        for item in items:
+            news_data.append({
+                'title': item.find('title').text,
+                'link': item.find('link').text,
+                'date': item.find('pubDate').text[:16] # Shorten date
+            })
+        return news_data
     except:
         return []
 
 # --- MAIN APP ---
 st.title("🌏 Global Stock Tracker Pro")
 
-# SIDEBAR
 with st.sidebar.form("entry"):
     st.header("Add Trade")
     d = st.date_input("Date")
@@ -139,12 +150,11 @@ with st.sidebar.form("entry"):
         st.success("Saved")
         st.rerun()
 
-# --- PROCESSING ---
 df_raw = load_portfolio()
 holdings = calculate_holdings(df_raw)
 
 if not holdings.empty:
-    # FETCH 5 DAYS DATA FOR P/L
+    # P/L Logic
     tickers = " ".join(holdings['Ticker'].tolist())
     try:
         hist_data = yf.download(tickers, period="5d", progress=False)
@@ -162,34 +172,28 @@ if not holdings.empty:
     except:
         holdings['Current Price'] = holdings['Avg Cost']; holdings['Prev Close'] = holdings['Avg Cost']
 
-    # CALCULATIONS
     holdings['Value (Native)'] = holdings['Current Price'] * holdings['Shares']
     holdings['Profit (Native)'] = holdings['Value (Native)'] - holdings['Total Cost Basis']
     holdings['Return %'] = (holdings['Profit (Native)'] / holdings['Total Cost Basis']) * 100
     holdings['Day Change $'] = (holdings['Current Price'] - holdings['Prev Close']) * holdings['Shares']
-    holdings['Day Change %'] = ((holdings['Current Price'] - holdings['Prev Close']) / holdings['Prev Close']) * 100
-
-    # Conversions
+    
     def to_hkd(row, col): return row[col] if ".HK" in row['Ticker'] else row[col] * USD_TO_HKD
     holdings['Value (HKD)'] = holdings.apply(lambda x: to_hkd(x, 'Value (Native)'), axis=1)
     holdings['Profit (HKD)'] = holdings.apply(lambda x: to_hkd(x, 'Profit (Native)'), axis=1)
     holdings['Day Change (HKD)'] = holdings.apply(lambda x: to_hkd(x, 'Day Change $'), axis=1)
 
-    # GLOBAL TOTALS
     total_val_hkd = holdings['Value (HKD)'].sum()
     total_profit_hkd = holdings['Profit (HKD)'].sum()
     total_day_change_hkd = holdings['Day Change (HKD)'].sum()
     prev_total_val_hkd = total_val_hkd - total_day_change_hkd
     global_day_pct = (total_day_change_hkd / prev_total_val_hkd * 100) if prev_total_val_hkd > 0 else 0.0
 
-    # HEADLINE
     c1, c2, c3 = st.columns(3)
     c1.metric("💰 Portfolio Value", f"HK$ {total_val_hkd:,.0f}")
     c2.metric("📈 Total Profit", f"HK$ {total_profit_hkd:,.0f}", delta_color="normal" if total_profit_hkd >= 0 else "inverse")
     c3.metric("⚡ Day's P/L", f"HK$ {total_day_change_hkd:,.0f}", delta=f"{global_day_pct:+.2f}%")
     st.divider()
 
-    # TABS
     tab_us, tab_hk, tab_hist = st.tabs(["🇺🇸 US Market", "🇭🇰 HK Market", "📋 History"])
 
     def render_interactive_table(df, currency):
@@ -202,22 +206,16 @@ if not holdings.empty:
         c1.metric("Market Value", f"{currency} {mkt_val:,.0f}")
         c2.metric("Day's P/L", f"{currency} {mkt_day_pl:,.0f}", delta=f"{mkt_pct:+.2f}%")
         
-        cols = ['Ticker', 'Name', 'Shares', 'Avg Cost', 'Current Price', 'Value (Native)', 'Profit (Native)', 'Return %', 'Day Change %']
-        
+        cols = ['Ticker', 'Name', 'Shares', 'Avg Cost', 'Current Price', 'Value (Native)', 'Profit (Native)', 'Return %']
         event = st.dataframe(
             df[cols].style.format({
                 "Avg Cost": f"{currency} {{:.2f}}", "Current Price": f"{currency} {{:.2f}}",
                 "Value (Native)": f"{currency} {{:,.0f}}", "Profit (Native)": f"{currency} {{:+,.0f}}",
-                "Return %": "{:+.1f}%", "Day Change %": "{:+.2f}%"
-            }).map(lambda x: f"color: {'green' if x > 0 else 'red'}", subset=['Profit (Native)', 'Return %', 'Day Change %']),
-            column_config={
-                "Name": st.column_config.TextColumn("Stock", width="medium"),
-                "Return %": st.column_config.NumberColumn("Total Return %"),
-                "Day Change %": st.column_config.NumberColumn("Day %")
-            },
+                "Return %": "{:+.1f}%"
+            }).map(lambda x: f"color: {'green' if x > 0 else 'red'}", subset=['Profit (Native)', 'Return %']),
+            column_config={"Name": st.column_config.TextColumn("Stock", width="medium")},
             use_container_width=True, hide_index=True, on_select="rerun", selection_mode="single-row"
         )
-        
         if len(event.selection['rows']) > 0:
             row_idx = event.selection['rows'][0]
             st.session_state.selected_ticker = df.iloc[row_idx]['Ticker']
@@ -226,15 +224,13 @@ if not holdings.empty:
     with tab_hk: render_interactive_table(holdings[holdings['Ticker'].str.contains(".HK")], "HK$")
     with tab_hist: st.dataframe(df_raw.sort_index(ascending=False))
 
-    # --- ANALYSIS SECTION ---
     st.divider()
     st.subheader("📊 Professional Analysis & News")
     
     current_selection = st.session_state.selected_ticker if st.session_state.selected_ticker else holdings.iloc[0]['Ticker']
     
-    col_chart, col_news = st.columns([3, 1]) # Chart is 3x wider than news
+    col_chart, col_news = st.columns([3, 1])
     
-    # --- CHART COLUMN ---
     with col_chart:
         col_a, col_b = st.columns([1,4])
         with col_a:
@@ -249,7 +245,8 @@ if not holdings.empty:
         data = get_market_data(target)
         
         if data is not None:
-            fig = make_subplots(rows=2, cols=1, row_heights=[0.7, 0.3], shared_xaxes=True)
+            # FIX: Reduce vertical spacing to close the gap
+            fig = make_subplots(rows=2, cols=1, row_heights=[0.8, 0.2], shared_xaxes=True, vertical_spacing=0.03)
             
             # Price & MA
             fig.add_trace(go.Candlestick(x=data['Date'], open=data['Open'], close=data['Close'], high=data['High'], low=data['Low'], name="Price"), row=1, col=1)
@@ -263,10 +260,10 @@ if not holdings.empty:
             fig.add_hline(y=30, row=2, col=1, line_dash="dot", line_color="green")
             fig.add_hline(y=70, row=2, col=1, line_dash="dot", line_color="red")
             
-            # NEW: INTERACTIVE SELECTORS
             fig.update_layout(
                 height=700, 
                 xaxis_rangeslider_visible=False,
+                margin=dict(l=10, r=10, t=30, b=10), # Reduce whitespace
                 xaxis=dict(
                     rangeselector=dict(
                         buttons=list([
@@ -284,29 +281,18 @@ if not holdings.empty:
         else:
             st.error("Could not load data.")
 
-    # --- NEWS COLUMN ---
     with col_news:
         st.write(f"**📰 Latest News**")
-        news_items = get_stock_news(target)
+        news_items = get_google_news(target)
         if news_items:
             for item in news_items:
-                try:
-                    title = item.get('title', 'No Title')
-                    link = item.get('link', '#')
-                    publisher = item.get('publisher', 'Unknown')
-                    
-                    # Simple card layout
-                    st.markdown(f"""
-                    <div style="padding: 10px; border-radius: 5px; margin-bottom: 10px; background-color: #f0f2f6;">
-                        <a href="{link}" target="_blank" style="text-decoration: none; color: #333; font-weight: bold;">{title}</a>
-                        <br>
-                        <span style="font-size: 0.8em; color: #666;">{publisher}</span>
-                    </div>
-                    """, unsafe_allow_html=True)
-                except:
-                    pass
+                st.markdown(f"""
+                <div style="padding: 10px; border-radius: 5px; margin-bottom: 10px; background-color: #f0f2f6;">
+                    <a href="{item['link']}" target="_blank" style="text-decoration: none; color: #333; font-weight: bold;">{item['title']}</a>
+                    <br><span style="font-size: 0.8em; color: #666;">{item['date']}</span>
+                </div>
+                """, unsafe_allow_html=True)
         else:
             st.info("No news found.")
-
 else:
     st.info("Add a trade to see the dashboard.")
