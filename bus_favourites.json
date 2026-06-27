@@ -1,11 +1,21 @@
 [
   {
-    "label": "Son to School (bus 31) - Opp Amber Gardens",
+    "label": "Me to Work (bus 196) - Robinson Rd",
+    "stop_code": "92241",
+    "services": ["196"]
+  },
+  {
+    "label": "Wife to Lazada One (bus 36) - Bras Basah",
+    "stop_code": "92241",
+    "services": ["36"]
+  },
+  {
+    "label": "Son to School (bus 31) - EtonHouse Broadrick",
     "stop_code": "92249",
     "services": ["31"]
   },
   {
-    "label": "Amber Gardens - all buses",
+    "label": "Amber Gardens - all buses (town-bound)",
     "stop_code": "92241",
     "services": []
   },
