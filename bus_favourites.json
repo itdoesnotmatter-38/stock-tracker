@@ -1,17 +1,17 @@
 [
   {
-    "label": "Son to School (bus 31) - Silversea",
-    "stop_code": "92049",
+    "label": "Son to School (bus 31) - Opp Amber Gardens",
+    "stop_code": "92249",
     "services": ["31"]
   },
   {
-    "label": "Silversea - all buses (Parkway Pde side)",
-    "stop_code": "92049",
+    "label": "Amber Gardens - all buses",
+    "stop_code": "92241",
     "services": []
   },
   {
-    "label": "Silversea - all buses (opposite side)",
-    "stop_code": "92059",
+    "label": "Opp Amber Gardens - all buses",
+    "stop_code": "92249",
     "services": []
   }
 ]
