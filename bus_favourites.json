@@ -1,0 +1,17 @@
+[
+  {
+    "label": "Son to School (bus 31) - Silversea",
+    "stop_code": "92049",
+    "services": ["31"]
+  },
+  {
+    "label": "Silversea - all buses (Parkway Pde side)",
+    "stop_code": "92049",
+    "services": []
+  },
+  {
+    "label": "Silversea - all buses (opposite side)",
+    "stop_code": "92059",
+    "services": []
+  }
+]
