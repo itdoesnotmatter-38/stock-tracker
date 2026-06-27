@@ -1,8 +1,8 @@
 [
   {
-    "label": "Me to Work (bus 196) - Robinson Rd",
+    "label": "Me to Work (196 / 196e express) - Robinson Rd",
     "stop_code": "92241",
-    "services": ["196"]
+    "services": ["196", "196e"]
   },
   {
     "label": "Wife to Lazada One (bus 36) - Bras Basah",
