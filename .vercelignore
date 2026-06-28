@@ -1,0 +1,9 @@
+# Keep the Python/Streamlit app out of the Vercel (static + functions) deploy
+app.py
+bus_app.py
+requirements.txt
+portfolio.csv
+bus_favourites.json
+README_BUS.md
+.devcontainer/
+__pycache__/

@@ -1,3 +1,5 @@
 __pycache__/
 *.pyc
 .streamlit/secrets.toml
+api/_key.js
+.vercel/

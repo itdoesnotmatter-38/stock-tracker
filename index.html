@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="theme-color" content="#0b6e4f" />
+<title>🚌 Singapore Bus Arrival</title>
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Ctext y='140' font-size='140'%3E🚌%3C/text%3E%3C/svg%3E" />
+<style>
+  :root { --green:#0b6e4f; --bg:#f4f6f8; --card:#fff; --line:#e6e9ee; --muted:#6b7280; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:#111; }
+  header { background:var(--green); color:#fff; padding:18px 16px 14px; position:sticky; top:0; z-index:5; }
+  header h1 { margin:0; font-size:20px; }
+  header .sub { font-size:12px; opacity:.9; margin-top:4px; }
+  .wrap { max-width:680px; margin:0 auto; padding:12px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; margin:12px 0; overflow:hidden; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+  .card h2 { font-size:16px; margin:0; padding:14px 16px 10px; }
+  .card h2 .stop { color:var(--muted); font-weight:500; font-size:13px; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th,td { text-align:left; padding:10px 12px; border-top:1px solid var(--line); }
+  th { font-size:11px; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); background:#fafbfc; }
+  .busno { font-weight:700; font-size:16px; }
+  .eta { font-variant-numeric:tabular-nums; font-weight:600; }
+  .arr { color:#dc2626; font-weight:700; }
+  .dim { color:#9ca3af; }
+  .err { color:#b91c1c; padding:12px 16px; font-size:14px; }
+  .legend { font-size:12px; color:var(--muted); padding:0 4px 4px; }
+  footer { text-align:center; color:var(--muted); font-size:12px; padding:18px; }
+  button.refresh { background:var(--green); color:#fff; border:0; border-radius:10px; padding:9px 14px; font-size:14px; font-weight:600; }
+  .bar { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:4px; }
+  .updated { font-size:12px; color:var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>🚌 Singapore Bus Arrival</h1>
+  <div class="sub">Live arrivals for the family • powered by LTA DataMall</div>
+</header>
+<div class="wrap">
+  <div class="bar">
+    <span class="updated" id="updated">Loading…</span>
+    <button class="refresh" onclick="loadAll()">🔄 Refresh</button>
+  </div>
+  <div class="legend">🟢 seats &nbsp; 🟡 standing &nbsp; 🔴 packed &nbsp; ♿ wheelchair accessible</div>
+  <div id="stops"></div>
+  <footer>Auto-refreshes every 30s · Tap a bus stop pole code to verify on site</footer>
+</div>
+
+<script>
+// Family favourites — edit here to add/remove stops or buses.
+const FAVS = [
+  { label: "Me to Work (196 / 196e express) — Robinson Rd", stop: "92241", buses: ["196","196e"] },
+  { label: "Wife to Lazada One (bus 36) — Bras Basah",      stop: "92241", buses: ["36"] },
+  { label: "Son to School (bus 31) — EtonHouse Broadrick",  stop: "92249", buses: ["31"] },
+  { label: "Amber Gardens — all buses (town-bound)",        stop: "92241", buses: [] },
+  { label: "Opp Amber Gardens — all buses",                stop: "92249", buses: [] },
+];
+
+const LOAD = { SEA:["🟢","Seats available"], SDA:["🟡","Standing only"], LSD:["🔴","Limited standing"] };
+const TYPE = { SD:"Single deck", DD:"Double deck", BD:"Bendy" };
+
+function mins(iso){
+  if(!iso) return null;
+  const d = (new Date(iso) - new Date())/60000;
+  return Math.round(d);
+}
+function eta(m){
+  if(m===null) return '<span class="dim">—</span>';
+  if(m<=0) return '<span class="arr">Arr</span>';
+  return '<span class="eta">'+m+' min</span>';
+}
+function row(s){
+  const a=[s.NextBus,s.NextBus2,s.NextBus3].map(b=>eta(mins((b||{}).EstimatedArrival)));
+  const first=s.NextBus||{};
+  const load=LOAD[first.Load]?LOAD[first.Load][1]:'—';
+  const type=TYPE[first.Type]||'—';
+  const wab=first.Feature==='WAB'?'♿':'';
+  return `<tr><td class="busno">${s.ServiceNo}</td><td>${a[0]}</td><td>${a[1]}</td><td>${a[2]}</td><td>${load}</td><td>${type} ${wab}</td></tr>`;
+}
+
+async function loadStop(fav){
+  try{
+    const r = await fetch('/api/arrivals?stop='+encodeURIComponent(fav.stop));
+    if(!r.ok){ const t=await r.text(); throw new Error(r.status+' '+t.slice(0,120)); }
+    const data = await r.json();
+    let svc = data.Services || [];
+    if(fav.buses.length) svc = svc.filter(s=>fav.buses.includes(s.ServiceNo));
+    svc.sort((a,b)=> (parseInt(a.ServiceNo)||9999)-(parseInt(b.ServiceNo)||9999));
+    if(!svc.length) return `<div class="err">No buses in service right now.</div>`;
+    return `<table><thead><tr><th>Bus</th><th>Next</th><th>After</th><th>3rd</th><th>Load</th><th>Type</th></tr></thead><tbody>${svc.map(row).join('')}</tbody></table>`;
+  }catch(e){
+    return `<div class="err">⚠️ ${e.message}</div>`;
+  }
+}
+
+async function loadAll(){
+  document.getElementById('updated').textContent = 'Updating…';
+  const host = document.getElementById('stops');
+  // Build skeleton first so cards keep their order
+  host.innerHTML = FAVS.map((f,i)=>`<div class="card"><h2>📍 ${f.label} <span class="stop">· Stop ${f.stop}</span></h2><div id="c${i}"><div class="err">Loading…</div></div></div>`).join('');
+  await Promise.all(FAVS.map(async (f,i)=>{
+    document.getElementById('c'+i).innerHTML = await loadStop(f);
+  }));
+  const t = new Date().toLocaleTimeString('en-SG',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  document.getElementById('updated').textContent = 'Last updated: '+t;
+}
+
+loadAll();
+setInterval(loadAll, 30000);
+</script>
+</body>
+</html>
